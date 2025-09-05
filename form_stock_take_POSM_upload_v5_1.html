@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Form Stock Take POSM — Upload Excel (v3.6)</title>
+
+  <script>
+    (function ensureXLSX(){
+      function loadFallback(src) {
+        var s = document.createElement('script');
+        s.src = src;
+        s.onload = function(){ console.log('XLSX fallback loaded:', src); };
+        s.onerror = function(){ console.error('Fallback load failed:', src); };
+        document.head.appendChild(s);
+      }
+      function check() {
+        if (window.XLSX) return;
+        loadFallback('https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js');
+        setTimeout(function(){
+          if (!window.XLSX) loadFallback('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+        }, 1500);
+      }
+      if (document.readyState === 'complete' || document.readyState === 'interactive') check();
+      else document.addEventListener('DOMContentLoaded', check);
+    })();
+  </script>
+
+  <!-- ====== CSS (Theme & Layout) ====== -->
+  <style>
+    :root{
+      --bg:#0f172a; --panel:#111827; --text:#e5e7eb; --muted:#94a3b8; --border:#1f2937;
+      --ok:#16a34a; --warn:#f59e0b; --err:#ef4444; --accent:#22c55e;
+      --input-bg:#0b1220; --hover:rgba(255,255,255,.02);
+    }
+    /* Dark mode */
+    body[data-theme="dark"]{
+      --bg:#0b0f1a; --panel:#0f172a; --text:#e5e7eb; --muted:#94a3b8; --border:#1e293b;
+      --hover:rgba(255,255,255,.03); --input-bg:#0a101b;
+    }
+    /* Light mode */
+    body[data-theme="light"]{
+      --bg:#f8fafc; --panel:#ffffff; --text:#0f172a; --muted:#475569; --border:#e2e8f0;
+      --ok:#16a34a; --warn:#d97706; --err:#dc2626; --accent:#0ea5e9;
+      --input-bg:#ffffff; --hover:rgba(0,0,0,.025);
+    }
+
+    *{ box-sizing: border-box; }
+    html,body{ height:100%; }
+    body{
+      margin:0; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial;
+      color:var(--text);
+      background: linear-gradient(180deg, var(--bg), var(--panel));
+      display:flex; flex-direction:column;
+    }
+
+    header{
+      padding:16px 24px; border-bottom:1px solid var(--border);
+      position:sticky; top:0; z-index:50; background:color-mix(in oklab, var(--panel) 92%, transparent);
+    }
+    .headerWrap{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    .headerLeft{ display:flex; flex-direction:column; gap:6px; min-width:260px; }
+    .headerLeft h1{ margin:0; font-size:20px; }
+    .hint{ font-size:12px; color:var(--muted); }
+    .themeCtrl{ display:flex; align-items:center; gap:8px; }
+    select, input, button, textarea{
+      width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border);
+      background:var(--input-bg); color:var(--text);
+    }
+    select{ min-width: 160px; }
+
+    /* Lebarkan kanvas */
+    main{ padding:24px; max-width:1600px; margin:0 auto; width:100%; flex:1 0 auto; }
+    .grid{ display:grid; grid-template-columns: repeat(12,1fr); gap:14px; }
+    .row{ grid-column: span 12; }
+    .col-6{ grid-column: span 6; } .col-8{ grid-column: span 8; }
+    .col-4{ grid-column: span 4; } .col-3{ grid-column: span 3; } .col-2{ grid-column: span 2; }
+
+    .card{ background: color-mix(in oklab, var(--panel) 94%, transparent);
+            border:1px solid var(--border); border-radius:12px; padding:14px; }
+    label{ display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
+    .actions{ display:flex; gap:8px; flex-wrap:wrap; }
+
+    .btn{ cursor:pointer; border:1px solid var(--border); background:color-mix(in oklab, var(--panel) 98%, black 0%); white-space:nowrap; }
+    .btn:hover{ filter: brightness(1.1); }
+    .btn.primary{ background:#14532d; border-color:#166534; color:#ecfdf5; }
+    .btn.warn{ background:#4b3d10; border-color:#f59e0b55; color:#fff; }
+    .btn.ghost{ background:transparent; }
+    .btn.danger{ background:#7f1d1d; border-color:#ef4444; color:#fee2e2; }
+    .btn.danger:hover{ background:#991b1b; }
+
+    .pill{ display:inline-flex; align-items:center; gap:6px; font-size:12px;
+           padding:4px 8px; border-radius:999px; border:1px solid var(--border); }
+    .pill.ok{ border-color:#166534; color:#16a34a; }
+    .pill.warn{ border-color:#854d0e; color:#d97706; }
+    .pill.err{ border-color:#7f1d1d; color:#dc2626; }
+    .sep{ height:1px; background:var(--border); margin:10px 0; }
+
+    /* Table + sticky header + anti-overlap + scroll X */
+    .tableWrap{
+      max-height:50vh; overflow-x:auto; overflow-y:auto;
+      border:1px solid var(--border); border-radius:10px; position:relative;
+    }
+    table{ width:100%; border-collapse:separate; border-spacing:0; table-layout:fixed; font-size:14px; }
+    th, td{ padding:8px 10px; border-bottom:1px solid var(--border); overflow:hidden; }
+    th{
+      position:sticky; top:0; z-index:5; text-align:left; color:var(--muted); font-weight:500;
+      background: var(--panel);
+    }
+    thead th{ white-space: nowrap; }
+    tr:hover td{ background: var(--hover); }
+    .right{ text-align:right; }
+    code{ white-space:nowrap; }
+
+    /* Table List: paksa lebar minimum + lebar kolom */
+    #tbl{ min-width: 1400px; }
+    th.col-code,td.col-code{ min-width:240px; width:auto; white-space:nowrap; }
+    th.col-name,td.col-name{ min-width:480px; width:auto; }
+    td.col-name{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    th.col-qty,td.col-qty{ min-width:110px; }
+    th.col-avail,td.col-avail{ min-width:130px; }
+    th.col-delta,td.col-delta{ min-width:100px; }
+    th.col-status,td.col-status{ min-width:140px; }
+    th.col-pic,td.col-pic{ min-width:160px; }
+    th.col-wh,td.col-wh{ min-width:160px; }
+    th.col-note,td.col-note{ min-width:260px; }
+    th.col-actions,td.col-actions{ min-width:80px; }
+
+    /* Table Missing (belum distock) */
+    #tblMissing{ min-width: 1200px; }
+    .missing th.col-code, .missing td.col-code{ min-width:200px; white-space:nowrap; }
+    .missing th.col-name, .missing td.col-name{ min-width:320px; }
+
+    /* Progress */
+    .progress{ display:flex; flex-direction:column; gap:6px; min-width:260px; }
+    .bar{ height:10px; background:var(--input-bg); border:1px solid var(--border); border-radius:999px; overflow:hidden; }
+    .bar>span{ display:block; height:100%; background: linear-gradient(90deg,var(--accent),#16a34a); width:0%; transition:width .2s ease; }
+
+    /* Footer */
+    footer{
+      flex-shrink:0; padding:12px 24px; border-top:1px solid var(--border);
+      background: var(--panel); color:var(--muted); font-size:12px;
+    }
+    .footerWrap{ display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+
+    /* Toolbar (1 baris, kanan) */
+    .toolbar{ display:flex; gap:8px; flex-wrap:nowrap; align-items:center; overflow:auto; }
+  </style>
+</head>
+<body data-theme="default">
+  <header>
+    <div class="headerWrap">
+      <div class="headerLeft">
+        <h1>Form Stock Take POSM — Upload Excel (v3.6)</h1>
+        <div class="hint">1) Upload Excel/CSV → 2) Ketik <b>Item Code</b> & <b>Qty</b> → 3) Tambah ke list → 4) Export CSV</div>
+      </div>
+      <div class="themeCtrl">
+        <label for="themeSel" class="hint">Theme</label>
+        <select id="themeSel">
+          <option value="default">Default</option>
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+        </select>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="grid">
+      <div class="card row">
+        <div class="grid">
+          <div class="col-6">
+            <label for="file">Pilih File Excel / CSV</label>
+            <input id="file" type="file" accept=".xlsx,.xls,.csv" />
+            <div class="hint" id="fileInfo">Belum ada file terunggah.</div>
+          </div>
+          <div class="col-3">
+            <label for="sheetSel">Sheet</label>
+            <select id="sheetSel" disabled></select>
+          </div>
+          <div class="col-3">
+            <label>&nbsp;</label>
+            <button class="btn" id="btnReload" disabled>Muat Ulang Sheet</button>
+          </div>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="grid">
+          <div class="col-4">
+            <label for="itemCode">Item Code</label>
+            <input id="itemCode" list="codes" placeholder="contoh: 2025-00175835-0003" autocomplete="off" disabled />
+            <datalist id="codes"></datalist>
+            <div class="hint" id="codeStatus"></div>
+          </div>
+
+          <div class="col-3">
+            <label for="qty">Qty</label>
+            <input id="qty" type="number" min="0" step="1" placeholder="0" disabled />
+            <div class="hint" id="qtyStatus"></div>
+          </div>
+
+          <div class="col-8">
+            <label for="note">Catatan (opsional)</label>
+            <textarea id="note" rows="3" placeholder="mis: kondisi, lokasi, detail pengecekan" disabled></textarea>
+          </div>
+        </div>
+
+        <div class="grid" style="margin-top:12px">
+          <div class="col-4">
+            <label>Item Name</label>
+            <input id="itemName" readonly />
+          </div>
+          <div class="col-3">
+            <label>Warehouse</label>
+            <input id="warehouse" readonly />
+          </div>
+          <div class="col-2">
+            <label>Rack</label>
+            <input id="rack" readonly />
+          </div>
+          <div class="col-3">
+            <label>PIC</label>
+            <input id="pic" readonly />
+          </div>
+        </div>
+
+        <div class="grid" style="margin-top:12px">
+          <div class="col-3">
+            <label>Stock Tersedia (Good + Surplus − Reserved)</label>
+            <input id="available" class="right" readonly />
+          </div>
+        </div>
+
+        <div style="margin-top:12px" class="actions">
+          <button class="btn primary" id="btnAdd" disabled>Tambah ke List</button>
+          <button class="btn ghost" id="btnClear" disabled>Bersihkan</button>
+        </div>
+      </div>
+
+      <div class="card row">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px;flex-wrap:wrap;">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <span class="pill ok" id="pillCount">0 item</span>
+            <span class="pill warn" id="pillWarn" style="display:none"></span>
+            <span class="pill" id="pillLoaded">0 kode termuat</span>
+          </div>
+
+          <div class="progress">
+            <div class="bar"><span id="barDone" style="width:0%"></span></div>
+            <div class="hint" id="textProgress">Sudah distock: 0% (0/0) • Belum: 100% (0/0)</div>
+          </div>
+
+          <!-- Toolbar 1 baris, rapih di kanan -->
+          <div class="toolbar">
+            <button class="btn" id="btnExport" disabled>Export CSV</button>
+            <button class="btn" id="btnShowMissing" disabled>Tampilkan Belum Distock</button>
+            <button class="btn warn" id="btnExportMissing" disabled>Export Belum Distock</button>
+            <button class="btn danger" id="btnReset" disabled>Reset List</button>
+          </div>
+        </div>
+
+        <div class="tableWrap">
+          <table id="tbl">
+            <thead>
+              <tr>
+                <th class="col-code">Item Code</th>
+                <th class="col-name">Item Name</th>
+                <th class="col-qty right">Qty</th>
+                <th class="col-avail right">Available</th>
+                <th class="col-delta right">Delta</th>
+                <th class="col-status">Status</th>
+                <th class="col-pic">PIC</th>
+                <th class="col-wh">Warehouse</th>
+                <th class="col-note">Catatan</th>
+                <th class="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Panel Belum Distock -->
+      <div class="card row" id="missingCard" style="display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px;flex-wrap:wrap;">
+          <div class="hint">Daftar <b>Belum Distock</b> — item dalam dataset yang belum masuk ke List.</div>
+          <div class="pill" id="pillMissing">0 item</div>
+        </div>
+        <div class="tableWrap" style="max-height:40vh">
+          <table id="tblMissing" class="missing">
+            <thead>
+              <tr>
+                <th class="col-code">Item Code</th>
+                <th class="col-name">Item Name</th>
+                <th class="col-avail right">Available</th>
+                <th class="col-pic">PIC</th>
+                <th class="col-wh">Warehouse</th>
+                <th>Rack</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <footer>
+    <div class="footerWrap">
+      <div>📅 Tanggal Stock: <strong id="tglStock">—</strong></div>
+      <div>created by <strong>EJV Team</strong></div>
+    </div>
+  </footer>
+
+<script>
+/* ===== Utils & Theme ===== */
+const el = id => document.getElementById(id);
+const fmt = n => new Intl.NumberFormat('id-ID').format(n);
+const uniq = arr => Array.from(new Set(arr.filter(Boolean)));
+function toInt(v){ if(v==null) return 0; if(typeof v==='number'&&Number.isFinite(v)) return Math.trunc(v); const s=String(v).replace(/[^0-9\\-]/g,''); const n=parseInt(s,10); return Number.isFinite(n)?n:0; }
+function computeAvailable(rec){ const good=toInt(rec.qtyGood); const surplus=toInt(rec.qtySurplus); const reserved=toInt(rec.qtyReserved); return Math.max(0,(good+surplus)-reserved); }
+function setStatus(node,text,cls='ok'){ node.textContent=text||''; node.className='hint pill '+(text?cls:''); }
+function clearDetail(){ el('itemName').value=''; el('warehouse').value=''; el('rack').value=''; el('available').value=''; el('pic').value=''; }
+function enableForm(enabled){ ['itemCode','qty','note','btnAdd','btnClear','btnExport','btnReset','btnShowMissing','btnExportMissing'].forEach(id=>{ el(id).disabled=!enabled; }); }
+
+(function(){
+  const sel = el('themeSel');
+  const saved = localStorage.getItem('posm_theme') || 'default';
+  document.body.setAttribute('data-theme', saved);
+  sel.value = saved;
+  sel.addEventListener('change', ()=>{
+    document.body.setAttribute('data-theme', sel.value);
+    localStorage.setItem('posm_theme', sel.value);
+  });
+})();
+
+/* ===== Global state ===== */
+let WORKBOOK=null, DATA_ROWS=[], DATA=[], IDX=new Map(), ROWS=[];
+
+/* ===== Column normalization ===== */
+function normalizeColumns(rows){
+  if(!rows.length) return {rows:[],map:{}};
+  const keys=uniq(rows.flatMap(r=>Object.keys(r)));
+  const map={}; const normalize=k=>k.toLowerCase().trim(); const byKey={};
+  keys.forEach(k=>{byKey[normalize(k)]=k});
+  const find=cands=>cands.map(normalize).map(k=>byKey[k]).find(Boolean);
+
+  map.item_code = find(['item code','code item','kode item','kode barang']);
+  map.item_name = find(['item name','nama item','nama barang']);
+  map.description = find(['item description','description','deskripsi']);
+  map.wh_code = find(['warehouse code','wh code','kode gudang']);
+  map.wh_name = find(['warehouse name','wh name','nama gudang']);
+  map.rack = find(['rack','rak','bin']);
+  map.pic = find(['pic','person in charge','penanggung jawab','penanggungjawab','pic name']);
+  map.qty_good = find(['qty good','good','stock good']);
+  map.qty_bad = find(['qty bad','bad','reject']);
+  map.qty_quarantine = find(['qty quarantine','quarantine','karantina']);
+  map.qty_surplus = find(['qty surplus','surplus']);
+  map.qty_reserved = find(['qty reserved','reserved','booking','alokasi']);
+
+  const required=['item_code','item_name','qty_good','qty_reserved'];
+  const missing = required.filter(k=>!map[k]);
+  return {rows, map, missing};
+}
+
+function buildData(rows,map){
+  const list=[];
+  for(const r of rows){
+    const rec = {
+      itemCode:String(r[map.item_code]??'').trim(),
+      itemName:String(r[map.item_name]??'').trim(),
+      description:String(r[map.description]??'').trim(),
+      warehouseCode:String(r[map.wh_code]??'').trim(),
+      warehouseName:String(r[map.wh_name]??'').trim(),
+      rack:String(r[map.rack]??'').trim(),
+      pic:String(map.pic?(r[map.pic]??''):'').trim(),
+      qtyGood:toInt(r[map.qty_good]),
+      qtyBad:toInt(r[map.qty_bad]),
+      qtyQuarantine:toInt(r[map.qty_quarantine]),
+      qtySurplus:toInt(r[map.qty_surplus]),
+      qtyReserved:toInt(r[map.qty_reserved]),
+    };
+    if (rec.itemCode && rec.itemCode.toLowerCase() !== 'nan') list.push(rec);
+  }
+  return list;
+}
+
+function aggregateByCode(list){
+  const m=new Map();
+  for(const r of list){
+    const code=r.itemCode.trim();
+    if(!m.has(code)){
+      m.set(code,{ itemCode:code,itemName:r.itemName, qtyGood:0,qtySurplus:0,qtyReserved:0, warehouses:new Set(),racks:new Set(),pics:new Set() });
+    }
+    const a=m.get(code);
+    a.qtyGood+=toInt(r.qtyGood);
+    a.qtySurplus+=toInt(r.qtySurplus);
+    a.qtyReserved+=toInt(r.qtyReserved);
+    if(r.warehouseCode||r.warehouseName) a.warehouses.add([r.warehouseCode,r.warehouseName].filter(Boolean).join(' / '));
+    if(r.rack) a.racks.add(r.rack);
+    if(r.pic) a.pics.add(r.pic);
+  }
+  for(const a of m.values()){
+    const whs=[...a.warehouses], rks=[...a.racks], pcs=[...a.pics];
+    a.warehouse = whs.slice(0,3).join(' | ') + (whs.length>3?` +${whs.length-3}`:'');
+    a.rack = rks.slice(0,3).join(' | ') + (rks.length>3?` +${rks.length-3}`:'');
+    a.pic = pcs.slice(0,3).join(' | ') + (pcs.length>3?` +${pcs.length-3}`:'');
+  }
+  return m;
+}
+
+/* ===== UI helpers ===== */
+function refreshBtnState(){
+  const code=el('itemCode').value.trim();
+  const q=parseInt(el('qty').value,10);
+  const rec=IDX.get(code);
+  const ok = !!rec && Number.isInteger(q) && q>=0; // Qty 0 diperbolehkan
+  el('btnAdd').disabled = !ok;
+}
+
+function afterLoadDataset(){
+  const codes=el('codes');
+  codes.innerHTML='';
+  [...IDX.values()].slice(0,5000).forEach(d=>{
+    const opt=document.createElement('option');
+    opt.value=d.itemCode; opt.label=`${d.itemCode} — ${d.itemName}`;
+    codes.appendChild(opt);
+  });
+
+  el('pillLoaded').textContent = `${IDX.size} kode termuat`;
+  enableForm(true);
+  el('itemCode').value=''; el('qty').value=''; el('note').value='';
+  setStatus(el('codeStatus'),''); setStatus(el('qtyStatus'),''); clearDetail();
+  renderProgress();
+}
+
+function loadSheetByName(name){
+  const ws=WORKBOOK.Sheets[name];
+  if (!ws) return alert('Sheet tidak ditemukan.');
+  let rows = XLSX.utils.sheet_to_json(ws,{defval:'',raw:true});
+  if(!rows.length){
+    const mat=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
+    if(mat.length){
+      const headers=mat[0].map(h=>String(h||''));
+      rows=mat.slice(1).map(r=>Object.fromEntries(headers.map((h,i)=>[h,r[i]])));
+    }
+  }
+  DATA_ROWS=rows;
+  const {map, missing} = normalizeColumns(rows);
+  if(missing&&missing.length){
+    setStatus(el('fileInfo'), `⚠️ Kolom wajib tidak ditemukan: ${missing.join(', ')}. Pastikan header sesuai (mis. "Item Code", "Item Name", "Qty Good", "Qty Reserved").`, 'warn');
+    enableForm(false);
+    return;
+  }
+  DATA = buildData(rows, map);
+  IDX = aggregateByCode(DATA);
+  afterLoadDataset();
+}
+
+/* ===== Progress & Belum Distock ===== */
+function renderProgress(){
+  const total = IDX.size || 0;
+  const codesInRows = new Set(ROWS.map(r=>r.itemCode));
+  const done = Math.min(codesInRows.size, total);
+  const pct = total ? Math.round((done/total)*100) : 0;
+  const notDone = Math.max(total-done, 0);
+  el('barDone').style.width = pct + '%';
+  el('textProgress').textContent = `Sudah distock: ${pct}% (${done}/${total}) • Belum: ${100-pct}% (${notDone}/${total})`;
+}
+
+function computeMissing(){
+  const stocked = new Set(ROWS.map(r=>r.itemCode));
+  const missing = [];
+  for (const rec of IDX.values()){
+    if (!stocked.has(rec.itemCode)){
+      const avail = computeAvailable(rec);
+      missing.push({
+        itemCode: rec.itemCode,
+        itemName: rec.itemName,
+        available: avail,
+        pic: rec.pic || '',
+        warehouse: rec.warehouse || '',
+        rack: rec.rack || ''
+      });
+    }
+  }
+  return missing.sort((a,b)=> a.itemCode.localeCompare(b.itemCode));
+}
+
+function renderMissing(){
+  const list = computeMissing();
+  const tbody = document.querySelector('#tblMissing tbody');
+  tbody.innerHTML = '';
+  list.forEach(m=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class='col-code'><code>${m.itemCode}</code></td>
+      <td class='col-name'>${m.itemName||''}</td>
+      <td class='col-avail right'>${fmt(m.available)}</td>
+      <td class='col-pic'>${m.pic||''}</td>
+      <td class='col-wh'>${m.warehouse||''}</td>
+      <td>${m.rack||''}</td>`;
+    tbody.appendChild(tr);
+  });
+  el('pillMissing').textContent = `${list.length} item`;
+}
+
+/* ===== Events ===== */
+let lastFile=null;
+el('file').addEventListener('change', async (ev)=>{
+  const f=ev.target.files[0];
+  if(!f) return;
+  lastFile=f;
+  setStatus(el('fileInfo'),`Memuat: ${f.name} (${Math.round(f.size/1024)} KB)...`,'warn');
+  const reader=new FileReader();
+  reader.onload=(e)=>{
+    try{
+      const data=e.target.result;
+      const wb=XLSX.read(data,{type:(f.name.endsWith('.csv')?'string':'array'),raw:true});
+      WORKBOOK=wb;
+      const sel=el('sheetSel');
+      sel.innerHTML='';
+      wb.SheetNames.forEach((n,i)=>{
+        const opt=document.createElement('option'); opt.value=n; opt.textContent=n; if(i===0) opt.selected=true; sel.appendChild(opt);
+      });
+      sel.disabled=false; el('btnReload').disabled=false;
+      setStatus(el('fileInfo'),`✔ File termuat. Sheets: ${wb.SheetNames.join(', ')}`,'ok');
+      loadSheetByName(wb.SheetNames[0]);
+    }catch(err){
+      console.error(err);
+      setStatus(el('fileInfo'),`Gagal membaca file: ${err.message}`,'err');
+      enableForm(false);
+    }
+  };
+  if (f.name.endsWith('.csv')) reader.readAsText(f);
+  else reader.readAsArrayBuffer(f);
+});
+
+el('btnReload').addEventListener('click', ()=>{
+  const sel=el('sheetSel');
+  if(!WORKBOOK) return;
+  loadSheetByName(sel.value);
+});
+
+el('itemCode').addEventListener('input', ()=>{
+  const code=el('itemCode').value.trim();
+  const rec=IDX.get(code);
+  const c= ROWS.filter(r=>r.itemCode===code).length;
+  if (!rec){
+    setStatus(el('codeStatus'), 'Kode tidak ditemukan di dataset', 'err');
+    clearDetail();
+  } else {
+    setStatus(el('codeStatus'),
+      (c>0?`⚠️ Kode sudah ada di list (${c}×) — periksa duplikasi`:`✔ Ditemukan: ${rec.itemName}`),
+      (c>0?'warn':'ok')
+    );
+    el('itemName').value = rec.itemName || '';
+    el('warehouse').value = rec.warehouse || '';
+    el('rack').value = rec.rack || '';
+    el('pic').value = rec.pic || '';
+    el('available').value = fmt(computeAvailable(rec));
+  }
+  el('qty').dispatchEvent(new Event('input'));
+  refreshBtnState();
+});
+
+el('qty').addEventListener('input', ()=>{
+  const code=el('itemCode').value.trim();
+  const rec=IDX.get(code);
+  const q=parseInt(el('qty').value,10); // boleh 0
+  if (!rec){
+    setStatus(el('qtyStatus'), 'Masukkan Item Code yang valid terlebih dulu', 'warn');
+  } else if (!Number.isInteger(q) || q<0){
+    setStatus(el('qtyStatus'), 'Qty harus ≥ 0', 'warn');
+  } else {
+    const avail = computeAvailable(rec);
+    if (q !== avail) setStatus(el('qtyStatus'), `Tidak sesuai — stok tersedia ${fmt(avail)} (OK bila sama)`, 'err');
+    else setStatus(el('qtyStatus'), 'Sesuai', 'ok');
+  }
+  refreshBtnState();
+});
+
+el('btnClear').addEventListener('click', ()=>{
+  el('itemCode').value=''; el('qty').value=''; el('note').value='';
+  setStatus(el('codeStatus'),''); setStatus(el('qtyStatus'),''); clearDetail();
+  refreshBtnState(); el('itemCode').focus();
+});
+
+function renderTable(){
+  const tbody=document.querySelector('#tbl tbody');
+  tbody.innerHTML='';
+  ROWS.forEach((r,i)=>{
+    const badge = r.isMismatch
+      ? `<span class="pill err" title="Qty input != Available (Δ ${r.delta>0?'+':''}${r.delta})">Tidak sesuai</span>`
+      : `<span class="pill ok">OK</span>`;
+    const dupCount = ROWS.filter(x=>x.itemCode===r.itemCode).length;
+    const dup = dupCount>1
+      ? ` <span class="pill warn" title="Item Code duplikat di list (${dupCount}×)">Duplikat</span>`
+      : '';
+    const tr=document.createElement('tr');
+    tr.innerHTML = `
+      <td class='col-code'><code>${r.itemCode}</code></td>
+      <td class='col-name' title="${(r.itemName||'').replace(/"/g,'&quot;')}">${r.itemName||''}</td>
+      <td class='col-qty right'>${fmt(r.qty)}</td>
+      <td class='col-avail right'>${fmt(r.availableAtAdd)}</td>
+      <td class='col-delta right'>${fmt(r.delta)}</td>
+      <td class='col-status'>${badge}${dup}</td>
+      <td class='col-pic'>${r.pic||''}</td>
+      <td class='col-wh'>${r.warehouse||''}</td>
+      <td class='col-note'>${(r.note||'').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td>
+      <td class='col-actions'><button class='btn ghost' data-i='${i}'>Hapus</button></td>`;
+    tbody.appendChild(tr);
+  });
+  el('pillCount').textContent = `${ROWS.length} item`;
+  el('pillWarn').style.display = ROWS.length ? 'inline-flex' : 'none';
+  el('pillWarn').textContent = ROWS.length ? 'Pastikan submit ke sistem ERP/WS sesuai prosedur' : '';
+  tbody.querySelectorAll('button[data-i]').forEach(b=>{
+    b.addEventListener('click', ev=>{
+      const idx=parseInt(ev.currentTarget.getAttribute('data-i'),10);
+      ROWS.splice(idx,1);
+      renderTable();
+      renderProgress();
+      if (el('missingCard').style.display !== 'none') renderMissing();
+    });
+  });
+  renderProgress();
+}
+
+el('btnAdd').addEventListener('click', ()=>{
+  const code=el('itemCode').value.trim();
+  const rec=IDX.get(code); if (!rec) return;
+  const qty=parseInt(el('qty').value,10); if (!Number.isInteger(qty) || qty<0) return;
+  const note=el('note').value.trim();
+  const avail=computeAvailable(rec);
+  const isMismatch = qty !== avail;
+  const existing = ROWS.filter(r=>r.itemCode===code).length;
+  if (existing>0){
+    if (!confirm(`Item Code ${code} sudah ada di list (${existing}×). Tambahkan lagi?`)) return;
+  }
+  ROWS.push({
+    ts: new Date().toISOString(),
+    itemCode: rec.itemCode,
+    itemName: rec.itemName,
+    qty,
+    availableAtAdd: avail,
+    delta: qty - avail,
+    isMismatch,
+    warehouse: rec.warehouse,
+    rack: rec.rack,
+    pic: rec.pic,
+    note
+  });
+  renderTable();
+  if (el('missingCard').style.display !== 'none') renderMissing();
+  el('qty').value=''; el('note').value=''; el('qty').focus();
+});
+
+el('btnReset').addEventListener('click', ()=>{
+  if (confirm('⚠️ Reset akan mengosongkan seluruh list. Lanjutkan?')){
+    ROWS.splice(0,ROWS.length);
+    renderTable();
+    if (el('missingCard').style.display !== 'none') renderMissing();
+  }
+});
+
+el('btnExport').addEventListener('click', ()=>{
+  if (!ROWS.length) return alert('List masih kosong');
+  const header = ['timestamp','item_code','item_name','qty','available_at_add','delta','status','pic','warehouse','rack','note'];
+  const lines = [header.join(',')];
+  ROWS.forEach(r=>{
+    const status = r.isMismatch ? 'mismatch' : 'ok';
+    const row = [r.ts, r.itemCode, r.itemName, r.qty, r.availableAtAdd, r.delta, status, (r.pic||''), (r.warehouse||''), (r.rack||''), (r.note||'')]
+      .map(v => '"' + String(v).replaceAll('"','""') + '"');
+    lines.push(row.join(','));
+  });
+  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'stock_take_upload_export.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+/* Belum Distock */
+el('btnShowMissing').addEventListener('click', ()=>{
+  const card = el('missingCard');
+  const isHidden = card.style.display === 'none';
+  if (isHidden){
+    renderMissing();
+    card.style.display = '';
+    el('btnShowMissing').textContent = 'Sembunyikan Belum Distock';
+  } else {
+    card.style.display = 'none';
+    el('btnShowMissing').textContent = 'Tampilkan Belum Distock';
+  }
+});
+
+el('btnExportMissing').addEventListener('click', ()=>{
+  const list = computeMissing();
+  if (!list.length) return alert('Semua item sudah distock 👍');
+  const header = ['item_code','item_name','available','pic','warehouse','rack'];
+  const lines = [header.join(',')];
+  list.forEach(m=>{
+    const row = [m.itemCode, m.itemName, m.available, (m.pic||''), (m.warehouse||''), (m.rack||'')]
+      .map(v => '"' + String(v).replaceAll('"','""') + '"');
+    lines.push(row.join(','));
+  });
+  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'belum_distock_export.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+/* Set Tanggal Stock (hari ini) */
+(function(){
+  const today = new Date();
+  const tgl = new Intl.DateTimeFormat('id-ID', { weekday:'long', day:'2-digit', month:'long', year:'numeric' }).format(today);
+  const t = document.getElementById('tglStock');
+  if (t) t.textContent = tgl;
+})();
+</script>
+</body>
+</html>
